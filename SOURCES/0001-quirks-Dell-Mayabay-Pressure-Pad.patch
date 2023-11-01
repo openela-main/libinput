@@ -1,0 +1,28 @@
+From 6dc3b6ace421ab7862a30074a5842cc99637b171 Mon Sep 17 00:00:00 2001
+From: Marge Yang <marge.yang@synaptics.corp-partner.google.com>
+Date: Wed, 8 Feb 2023 01:24:53 -0500
+Subject: [PATCH] quirks: Dell Mayabay (Pressure Pad).
+
+Signed-off-by: Marge Yang <marge.yang@synaptics.corp-partner.google.com>
+(cherry picked from commit 74415b13fb72c457e5439c974f59e1b0d08a27ed)
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ quirks/50-system-dell.quirks | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/quirks/50-system-dell.quirks b/quirks/50-system-dell.quirks
+index cbd1fbcb..0fb43aac 100644
+--- a/quirks/50-system-dell.quirks
++++ b/quirks/50-system-dell.quirks
+@@ -116,3 +116,9 @@ MatchBus=i2c
+ MatchVendor=0x27C6
+ MatchProduct=0x0F60
+ AttrEventCodeDisable=ABS_MT_PRESSURE;ABS_PRESSURE;
++
++[Dell Mayabay Touchpad]
++MatchBus=i2c
++MatchVendor=0x06CB
++MatchProduct=0xCFA0
++AttrEventCodeDisable=ABS_MT_PRESSURE;ABS_PRESSURE;
+--
+2.41.0
