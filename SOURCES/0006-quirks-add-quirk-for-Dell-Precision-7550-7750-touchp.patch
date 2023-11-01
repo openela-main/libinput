@@ -1,0 +1,32 @@
+From 89e2e00b307d7aea63b43ff83cbf520aee27fad5 Mon Sep 17 00:00:00 2001
+From: Scott Jann <sjann@knight-rider.org>
+Date: Mon, 3 Aug 2020 00:03:59 -0500
+Subject: [PATCH libinput] quirks: add quirk for Dell Precision 7550/7750
+ touchpad
+
+Signed-off-by: Scott Jann <sjann@knight-rider.org>
+(cherry picked from commit 69959c8a3b0612fb2bea015713f630a896188529)
+---
+ quirks/50-system-dell.quirks | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/quirks/50-system-dell.quirks b/quirks/50-system-dell.quirks
+index 232c309a..aaddbffe 100644
+--- a/quirks/50-system-dell.quirks
++++ b/quirks/50-system-dell.quirks
+@@ -65,6 +65,12 @@ MatchName=*DualPoint Stick
+ MatchDMIModalias=dmi:*svnDellInc.:pnLatitudeE7470*
+ AttrTrackpointMultiplier=0.125
+ 
++[Precision 7x50 Touchpad]
++MatchBus=i2c
++MatchUdevType=touchpad
++MatchDMIModalias=dmi:*svnDellInc.:pnPrecision7?50*
++AttrInputPropDisable=INPUT_PROP_BUTTONPAD
++
+ # The touch device has the same vid/pid as the totem, the MatchName
+ # directive is required here
+ [Canvas Totem]
+-- 
+2.31.1
+
