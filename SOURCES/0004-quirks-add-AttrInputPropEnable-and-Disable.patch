@@ -1,0 +1,447 @@
+From ea835c0f9a3cf8b599ea63f1057ee8cdb997db95 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Fri, 23 Oct 2020 10:38:14 +1000
+Subject: [PATCH libinput 4/5] quirks: add AttrInputPropEnable and Disable
+
+The latter requires libevdev 1.10 but since that'll take a while to filter
+into our various CI systems, let's make it conditional.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+(cherry picked from commit e882bd02167a9e2ca1c26c104026a8b29bf23ffa)
+---
+ doc/user/device-quirks.rst            |  6 +++
+ meson.build                           |  3 ++
+ src/evdev.c                           | 35 ++++++++++++++++
+ src/quirks.c                          | 51 ++++++++++++++++++++++++
+ src/quirks.h                          | 16 ++++++++
+ src/util-prop-parsers.c               | 57 +++++++++++++++++++++++++++
+ src/util-prop-parsers.h               |  1 +
+ test/litest-device-keyboard-quirked.c | 17 +++++++-
+ test/test-device.c                    | 16 +++++++-
+ test/test-utils.c                     | 47 ++++++++++++++++++++++
+ 10 files changed, 247 insertions(+), 2 deletions(-)
+
+diff --git a/doc/user/device-quirks.rst b/doc/user/device-quirks.rst
+index 21c43e1c..faaea47f 100644
+--- a/doc/user/device-quirks.rst
++++ b/doc/user/device-quirks.rst
+@@ -181,6 +181,12 @@ AttrEventCodeEnable=EV_ABS;BTN_STYLUS;EV_KEY:0x123;
+     Enables the evdev event type/code tuples on the device. Entries may be
+     a named event type, or a named event code, or a named event type with a
+     hexadecimal event code, separated by a single colon.
++AttrInputPropDisable=INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER;
++    Disables the evdev input property on the device. Entries may be
++    a named input property or the hexadecimal value of that property.
++AttrInputPropEnable=INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER;
++    Enables the evdev input property on the device. Entries may be
++    a named input property or the hexadecimal value of that property.
+ AttrPointingStickIntegration=internal|external
+     Indicates the integration of the pointing stick. This is a string enum.
+     Only needed for external pointing sticks. These are rare.
+diff --git a/meson.build b/meson.build
+index 0481fa10..040e3f1f 100644
+--- a/meson.build
++++ b/meson.build
+@@ -125,6 +125,9 @@ pkgconfig = import('pkgconfig')
+ dep_udev = dependency('libudev')
+ dep_mtdev = dependency('mtdev', version : '>= 1.1.0')
+ dep_libevdev = dependency('libevdev')
++config_h.set10('HAVE_LIBEVDEV_DISABLE_PROPERTY',
++		dep_libevdev.version().version_compare('>= 1.9.902'))
++
+ dep_lm = cc.find_library('m', required : false)
+ dep_rt = cc.find_library('rt', required : false)
+ 
+diff --git a/src/evdev.c b/src/evdev.c
+index 4bcd3066..44d01711 100644
+--- a/src/evdev.c
++++ b/src/evdev.c
+@@ -2050,6 +2050,8 @@ evdev_pre_configure_model_quirks(struct evdev_device *device)
+ 	struct quirks_context *quirks;
+ 	struct quirks *q;
+ 	const struct quirk_tuples *t;
++	const uint32_t *props = NULL;
++	size_t nprops = 0;
+ 	char *prop;
+ 
+ 	/* Touchpad is a clickpad but INPUT_PROP_BUTTONPAD is not set, see
+@@ -2130,6 +2132,39 @@ evdev_pre_configure_model_quirks(struct evdev_device *device)
+ 		}
+ 	}
+ 
++	if (quirks_get_uint32_array(q,
++				    QUIRK_ATTR_INPUT_PROP_ENABLE,
++				    &props,
++				    &nprops)) {
++		for (size_t idx = 0; idx < nprops; idx++) {
++			unsigned int p = props[idx];
++			libevdev_enable_property(device->evdev, p);
++			evdev_log_debug(device,
++					"quirks: enabling %s (%#x)\n",
++					libevdev_property_get_name(p),
++					p);
++		}
++	}
++
++	if (quirks_get_uint32_array(q,
++					 QUIRK_ATTR_INPUT_PROP_DISABLE,
++					 &props,
++					 &nprops)) {
++#if HAVE_LIBEVDEV_DISABLE_PROPERTY
++		for (size_t idx = 0; idx < nprops; idx++) {
++			unsigned int p = props[idx];
++			libevdev_disable_property(device->evdev, p);
++			evdev_log_debug(device,
++					"quirks: disabling %s (%#x)\n",
++					libevdev_property_get_name(p),
++					p);
++		}
++#else
++		evdev_log_error(device,
++				"quirks: a quirk for this device requires newer libevdev than installed\n");
++#endif
++	}
++
+ 	quirks_unref(q);
+ }
+ 
+diff --git a/src/quirks.c b/src/quirks.c
+index 69f41fde..4a49154f 100644
+--- a/src/quirks.c
++++ b/src/quirks.c
+@@ -57,6 +57,14 @@ enum property_type {
+ 	PT_RANGE,
+ 	PT_DOUBLE,
+ 	PT_TUPLES,
++	PT_UINT_ARRAY,
++};
++
++struct quirk_array {
++	union {
++		uint32_t u[32];
++	} data;
++	size_t nelements;
+ };
+ 
+ /**
+@@ -79,6 +87,7 @@ struct property {
+ 		struct quirk_dimensions dim;
+ 		struct quirk_range range;
+ 		struct quirk_tuples tuples;
++		struct quirk_array array;
+ 	} value;
+ };
+ 
+@@ -274,6 +283,8 @@ quirk_get_name(enum quirk q)
+ 	case QUIRK_ATTR_MSC_TIMESTAMP:			return "AttrMscTimestamp";
+ 	case QUIRK_ATTR_EVENT_CODE_DISABLE:		return "AttrEventCodeDisable";
+ 	case QUIRK_ATTR_EVENT_CODE_ENABLE:		return "AttrEventCodeEnable";
++	case QUIRK_ATTR_INPUT_PROP_DISABLE:		return "AttrInputPropDisable";
++	case QUIRK_ATTR_INPUT_PROP_ENABLE:		return "AttrInputPropEnable";
+ 	default:
+ 		abort();
+ 	}
+@@ -758,6 +769,24 @@ parse_attr(struct quirks_context *ctx,
+ 		p->value.tuples.ntuples = nevents;
+ 		p->type = PT_TUPLES;
+ 
++		rc = true;
++	} else if (streq(key, quirk_get_name(QUIRK_ATTR_INPUT_PROP_DISABLE)) ||
++		   streq(key, quirk_get_name(QUIRK_ATTR_INPUT_PROP_ENABLE))) {
++		unsigned int props[INPUT_PROP_CNT];
++		size_t nprops = ARRAY_LENGTH(props);
++		if (streq(key, quirk_get_name(QUIRK_ATTR_INPUT_PROP_DISABLE)))
++			p->id = QUIRK_ATTR_INPUT_PROP_DISABLE;
++		else
++			p->id = QUIRK_ATTR_INPUT_PROP_ENABLE;
++
++		if (!parse_input_prop_property(value, props, &nprops) ||
++		    nprops == 0)
++			goto out;
++
++		memcpy(p->value.array.data.u, props, nprops * sizeof(unsigned int));
++		p->value.array.nelements = nprops;
++		p->type = PT_UINT_ARRAY;
++
+ 		rc = true;
+ 	} else {
+ 		qlog_error(ctx, "Unknown key %s in %s\n", key, s->name);
+@@ -1589,3 +1618,25 @@ quirks_get_tuples(struct quirks *q,
+ 
+ 	return true;
+ }
++
++bool
++quirks_get_uint32_array(struct quirks *q,
++			enum quirk which,
++			const uint32_t **array,
++			size_t *nelements)
++{
++	struct property *p;
++
++	if (!q)
++		return false;
++
++	p = quirk_find_prop(q, which);
++	if (!p)
++		return false;
++
++	assert(p->type == PT_UINT_ARRAY);
++	*array = p->value.array.data.u;
++	*nelements = p->value.array.nelements;
++
++	return true;
++}
+diff --git a/src/quirks.h b/src/quirks.h
+index 0b2fe9f3..4f2c6a8c 100644
+--- a/src/quirks.h
++++ b/src/quirks.h
+@@ -110,6 +110,8 @@ enum quirk {
+ 	QUIRK_ATTR_MSC_TIMESTAMP,
+ 	QUIRK_ATTR_EVENT_CODE_DISABLE,
+ 	QUIRK_ATTR_EVENT_CODE_ENABLE,
++	QUIRK_ATTR_INPUT_PROP_DISABLE,
++	QUIRK_ATTR_INPUT_PROP_ENABLE,
+ 
+ 	_QUIRK_LAST_ATTR_QUIRK_, /* Guard: do not modify */
+ };
+@@ -313,3 +315,17 @@ bool
+ quirks_get_tuples(struct quirks *q,
+ 		  enum quirk which,
+ 		  const struct quirk_tuples **tuples);
++
++/**
++ * Get the uint32 array of the given quirk.
++ * This function will assert if the quirk type does not match the
++ * requested type. If the quirk is not set for this device, tuples is
++ * unchanged.
++ *
++ * @return true if the quirk value is valid, false otherwise.
++ */
++bool
++quirks_get_uint32_array(struct quirks *q,
++			enum quirk which,
++			const uint32_t **array,
++			size_t *nelements);
+diff --git a/src/util-prop-parsers.c b/src/util-prop-parsers.c
+index 9e076328..5a5cf8e0 100644
+--- a/src/util-prop-parsers.c
++++ b/src/util-prop-parsers.c
+@@ -402,6 +402,63 @@ out:
+ 	return rc;
+ }
+ 
++/**
++ * Parses a string of the format "INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER;0x123;"
++ * where each element must be a named input prop OR a hexcode in the form
++ * 0x1234
++ *
++ * props must point to an existing array of size nprops.
++ * nprops specifies the size of the array in props and returns the number
++ * of elements, elements exceeding nprops are simply ignored, just make sure
++ * props is large enough for your use-case.
++ *
++ * On success, props contains nprops elements.
++ */
++bool
++parse_input_prop_property(const char *prop, unsigned int *props_out, size_t *nprops)
++{
++	char **strv = NULL;
++	bool rc = false;
++	size_t count = 0;
++	size_t idx;
++	unsigned int props[INPUT_PROP_CNT]; /* doubling up on quirks is a bug */
++
++	strv = strv_from_string(prop, ";");
++	if (!strv)
++		goto out;
++
++	for (idx = 0; strv[idx]; idx++)
++		count++;
++
++	if (count == 0 || count > ARRAY_LENGTH(props))
++		goto out;
++
++	count = min(*nprops, count);
++	for (idx = 0; strv[idx]; idx++) {
++		char *s = strv[idx];
++		unsigned int prop;
++
++		if (safe_atou_base(s, &prop, 16)) {
++			if (prop > INPUT_PROP_MAX)
++				goto out;
++		} else {
++			int val = libevdev_property_from_name(s);
++			if (val == -1)
++				goto out;
++			prop = (unsigned int)val;
++		}
++		props[idx] = prop;
++	}
++
++	memcpy(props_out, props, count * sizeof *props);
++	*nprops = count;
++	rc = true;
++
++out:
++	strv_free(strv);
++	return rc;
++}
++
+ /**
+  * Parse the property value for the EVDEV_ABS_00 properties. Spec is
+  *  EVDEV_ABS_00=min:max:res:fuzz:flat
+diff --git a/src/util-prop-parsers.h b/src/util-prop-parsers.h
+index 7ed136a9..5f0d8673 100644
+--- a/src/util-prop-parsers.h
++++ b/src/util-prop-parsers.h
+@@ -38,6 +38,7 @@ bool parse_calibration_property(const char *prop, float calibration[6]);
+ bool parse_range_property(const char *prop, int *hi, int *lo);
+ #define EVENT_CODE_UNDEFINED 0xffff
+ bool parse_evcode_property(const char *prop, struct input_event *events, size_t *nevents);
++bool parse_input_prop_property(const char *prop, unsigned int *props_out, size_t *nprops);
+ 
+ enum tpkbcombo_layout {
+ 	TPKBCOMBO_LAYOUT_UNKNOWN,
+diff --git a/test/litest-device-keyboard-quirked.c b/test/litest-device-keyboard-quirked.c
+index 748794b2..53161fa4 100644
+--- a/test/litest-device-keyboard-quirked.c
++++ b/test/litest-device-keyboard-quirked.c
+@@ -191,6 +191,10 @@ static int events[] = {
+ 	EV_LED, LED_NUML,
+ 	EV_LED, LED_CAPSL,
+ 	EV_LED, LED_SCROLLL,
++
++	/* gets disabled */
++	INPUT_PROP_MAX, INPUT_PROP_POINTING_STICK,
++
+ 	-1, -1,
+ };
+ 
+@@ -201,7 +205,18 @@ static const char quirk_file[] =
+ "\n"
+ "[litest Quirked keyboard disable F1-F3]\n"
+ "MatchName=litest Quirked Keyboard\n"
+-"AttrEventCodeDisable=KEY_F1;EV_KEY:0x3c;KEY_F3\n";
++"AttrEventCodeDisable=KEY_F1;EV_KEY:0x3c;KEY_F3\n"
++#if HAVE_LIBEVDEV_DISABLE_PROPERTY
++"\n"
++"[litest Quirked keyboard enable buttonpad]\n"
++"MatchName=litest Quirked Keyboard\n"
++"AttrInputPropEnable=INPUT_PROP_BUTTONPAD\n"
++"\n"
++"[litest Quirked keyboard disable pointingstick]\n"
++"MatchName=litest Quirked Keyboard\n"
++"AttrInputPropDisable=INPUT_PROP_POINTING_STICK\n"
++#endif
++;
+ 
+ TEST_DEVICE("keyboard-quirked",
+ 	.type = LITEST_KEYBOARD_QUIRKED,
+diff --git a/test/test-device.c b/test/test-device.c
+index a50372d4..6c38ed44 100644
+--- a/test/test-device.c
++++ b/test/test-device.c
+@@ -1454,6 +1454,10 @@ START_TEST(device_quirks)
+ 	char **message;
+ 	bool disable_key_f1 = false,
+ 	     enable_btn_left = false;
++#if HAVE_LIBEVDEV_DISABLE_PROPERTY
++	bool disable_pointingstick = false,
++	     enable_buttonpad = false;
++#endif
+ 
+ 	li = litest_create_context();
+ 	libinput_log_set_priority(li, LIBINPUT_LOG_PRIORITY_DEBUG);
+@@ -1480,12 +1484,22 @@ START_TEST(device_quirks)
+ 			disable_key_f1 = true;
+ 		if (strstr(*message, "enabling EV_KEY BTN_LEFT"))
+ 			enable_btn_left = true;
+-
++#if HAVE_LIBEVDEV_DISABLE_PROPERTY
++		if (strstr(*message, "enabling INPUT_PROP_BUTTONPAD"))
++			enable_buttonpad = true;
++		if (strstr(*message, "disabling INPUT_PROP_POINTING_STICK"))
++			disable_pointingstick = true;
++#endif
++		free(*message);
+ 		message++;
+ 	}
+ 
+ 	ck_assert(disable_key_f1);
+ 	ck_assert(enable_btn_left);
++#if HAVE_LIBEVDEV_DISABLE_PROPERTY
++	ck_assert(enable_buttonpad);
++	ck_assert(disable_pointingstick);
++#endif
+ 
+ 	litest_disable_log_handler(li);
+ 
+diff --git a/test/test-utils.c b/test/test-utils.c
+index 5faec0e4..5955f56e 100644
+--- a/test/test-utils.c
++++ b/test/test-utils.c
+@@ -546,6 +546,52 @@ START_TEST(evcode_prop_parser)
+ }
+ END_TEST
+ 
++START_TEST(input_prop_parser)
++{
++	struct parser_test_val {
++		const char *prop;
++		bool success;
++		size_t nvals;
++		uint32_t values[20];
++	} tests[] = {
++		{ "INPUT_PROP_BUTTONPAD", true, 1, {INPUT_PROP_BUTTONPAD}},
++		{ "INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER", true, 2,
++			{ INPUT_PROP_BUTTONPAD,
++			  INPUT_PROP_POINTER }},
++		{ "INPUT_PROP_BUTTONPAD;0x00;0x03", true, 3,
++			{ INPUT_PROP_BUTTONPAD,
++			  INPUT_PROP_POINTER,
++			  INPUT_PROP_SEMI_MT }},
++		{ .prop = "", .success = false },
++		{ .prop = "0xff", .success = false },
++		{ .prop = "INPUT_PROP", .success = false },
++		{ .prop = "INPUT_PROP_FOO", .success = false },
++		{ .prop = "INPUT_PROP_FOO;INPUT_PROP_FOO", .success = false },
++		{ .prop = "INPUT_PROP_POINTER;INPUT_PROP_FOO", .success = false },
++		{ .prop = "none", .success = false },
++		{ .prop = NULL },
++	};
++	struct parser_test_val *t;
++
++	for (int i = 0; tests[i].prop; i++) {
++		bool success;
++		uint32_t props[32];
++		size_t nprops = ARRAY_LENGTH(props);
++
++		t = &tests[i];
++		success = parse_input_prop_property(t->prop, props, &nprops);
++		ck_assert(success == t->success);
++		if (!success)
++			continue;
++
++		ck_assert_int_eq(nprops, t->nvals);
++		for (size_t j = 0; j < t->nvals; j++) {
++			ck_assert_int_eq(t->values[j], props[j]);
++		}
++	}
++}
++END_TEST
++
+ START_TEST(evdev_abs_parser)
+ {
+ 	struct test {
+@@ -1244,6 +1290,7 @@ litest_utils_suite(void)
+ 	tcase_add_test(tc, calibration_prop_parser);
+ 	tcase_add_test(tc, range_prop_parser);
+ 	tcase_add_test(tc, evcode_prop_parser);
++	tcase_add_test(tc, input_prop_parser);
+ 	tcase_add_test(tc, evdev_abs_parser);
+ 	tcase_add_test(tc, safe_atoi_test);
+ 	tcase_add_test(tc, safe_atoi_base_16_test);
+-- 
+2.31.1
+

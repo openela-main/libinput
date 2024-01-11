@@ -1,0 +1,149 @@
+From bf1dea1a8e516dd0372c2e7e3c818a05f3777a89 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Tue, 3 Nov 2020 15:24:23 +1000
+Subject: [PATCH libinput 3/4] Revert "tools: switch measure-touch-size to
+ python-libevdev"
+
+This reverts commit deb759a0699a0ad18a9fa3dda8f1b397e34ae537.
+---
+ tools/libinput-measure-touch-size.py | 79 ++++++++++++++++------------
+ 1 file changed, 44 insertions(+), 35 deletions(-)
+
+diff --git a/tools/libinput-measure-touch-size.py b/tools/libinput-measure-touch-size.py
+index 5d98bc28..f974df43 100755
+--- a/tools/libinput-measure-touch-size.py
++++ b/tools/libinput-measure-touch-size.py
+@@ -28,7 +28,8 @@ import sys
+ import subprocess
+ import argparse
+ try:
+-    import libevdev
++    import evdev
++    import evdev.ecodes
+     import pyudev
+ except ModuleNotFoundError as e:
+     print('Error: {}'.format(str(e)), file=sys.stderr)
+@@ -171,23 +172,32 @@ class InvalidDeviceError(Exception):
+     pass
+ 
+ 
+-class Device(libevdev.Device):
++class Device(object):
+     def __init__(self, path):
+         if path is None:
+             self.path = self.find_touch_device()
+         else:
+             self.path = path
+ 
+-        fd = open(self.path, 'rb')
+-        super().__init__(fd)
++        self.device = evdev.InputDevice(self.path)
+ 
+-        print("Using {}: {}\n".format(self.name, self.path))
++        print("Using {}: {}\n".format(self.device.name, self.path))
+ 
+-        if not self.has(libevdev.EV_ABS.ABS_MT_TOUCH_MAJOR):
++       # capabilities returns a dict with the EV_* codes as key,
++        # each of which is a list of tuples of (code, AbsInfo)
++        #
++        # Get the abs list first (or empty list if missing),
++        # then extract the touch major absinfo from that
++        caps = self.device.capabilities(absinfo=True).get(
++                evdev.ecodes.EV_ABS, []
++               )
++        codes = [cap[0] for cap in caps]
++
++        if evdev.ecodes.ABS_MT_TOUCH_MAJOR not in codes:
+             raise InvalidDeviceError("Device does not have ABS_MT_TOUCH_MAJOR")
+ 
+-        self.has_minor = self.has(libevdev.EV_ABS.ABS_MT_TOUCH_MINOR)
+-        self.has_orientation = self.has(libevdev.EV_ABS.ABS_MT_ORIENTATION)
++        self.has_minor = evdev.ecodes.ABS_MT_TOUCH_MINOR in codes
++        self.has_orientation = evdev.ecodes.ABS_MT_ORIENTATION in codes
+ 
+         self.up = 0
+         self.down = 0
+@@ -239,32 +249,32 @@ class Device(libevdev.Device):
+         return self.sequences[-1]
+ 
+     def handle_key(self, event):
+-        tapcodes = [libevdev.EV_KEY.BTN_TOOL_DOUBLETAP,
+-                    libevdev.EV_KEY.BTN_TOOL_TRIPLETAP,
+-                    libevdev.EV_KEY.BTN_TOOL_QUADTAP,
+-                    libevdev.EV_KEY.BTN_TOOL_QUINTTAP]
++        tapcodes = [evdev.ecodes.BTN_TOOL_DOUBLETAP,
++                    evdev.ecodes.BTN_TOOL_TRIPLETAP,
++                    evdev.ecodes.BTN_TOOL_QUADTAP,
++                    evdev.ecodes.BTN_TOOL_QUINTTAP]
+         if event.code in tapcodes and event.value > 0:
+             print("\rThis tool cannot handle multiple fingers, "
+                   "output will be invalid", file=sys.stderr)
+ 
+     def handle_abs(self, event):
+-        if event.matches(libevdev.EV_ABS.ABS_MT_TRACKING_ID):
+-            if event.value > -1:
+-                self.start_new_sequence(event.value)
+-            else:
+-                try:
+-                    s = self.current_sequence()
+-                    s.finalize()
+-                    print("\r{}".format(s))
+-                except IndexError:
+-                    # If the finger was down during start
+-                    pass
+-        elif event.matches(libevdev.EV_ABS.ABS_MT_TOUCH_MAJOR):
+-            self.touch.major = event.value
+-        elif event.matches(libevdev.EV_ABS.ABS_MT_TOUCH_MINOR):
+-            self.touch.minor = event.value
+-        elif event.matches(libevdev.EV_ABS.ABS_MT_ORIENTATION):
+-            self.touch.orientation = event.value
++        if event.code == evdev.ecodes.ABS_MT_TRACKING_ID:
++                if event.value > -1:
++                    self.start_new_sequence(event.value)
++                else:
++                    try:
++                        s = self.current_sequence()
++                        s.finalize()
++                        print("\r{}".format(s))
++                    except IndexError:
++                        # If the finger was down during start
++                        pass
++        elif event.code == evdev.ecodes.ABS_MT_TOUCH_MAJOR:
++                self.touch.major = event.value
++        elif event.code == evdev.ecodes.ABS_MT_TOUCH_MINOR:
++                self.touch.minor = event.value
++        elif event.code == evdev.ecodes.ABS_MT_ORIENTATION:
++                self.touch.orientation = event.value
+ 
+     def handle_syn(self, event):
+         if self.touch.dirty:
+@@ -278,11 +288,11 @@ class Device(libevdev.Device):
+                 pass
+ 
+     def handle_event(self, event):
+-        if event.matches(libevdev.EV_ABS):
++        if event.type == evdev.ecodes.EV_ABS:
+             self.handle_abs(event)
+-        elif event.matches(libevdev.EV_KEY):
++        elif event.type == evdev.ecodes.EV_KEY:
+             self.handle_key(event)
+-        elif event.matches(libevdev.EV_SYN):
++        elif event.type == evdev.ecodes.EV_SYN:
+             self.handle_syn(event)
+ 
+     def read_events(self):
+@@ -293,9 +303,8 @@ class Device(libevdev.Device):
+         print("Place a single finger on the device to measure touch size.\n"
+               "Ctrl+C to exit\n")
+ 
+-        while True:
+-            for event in self.events():
+-                self.handle_event(event)
++        for event in self.device.read_loop():
++            self.handle_event(event)
+ 
+ 
+ def colon_tuple(string):
+-- 
+2.28.0
+

@@ -1,0 +1,33 @@
+From 7a69cf4c04c86d1699d82486ca84d1892ad65e07 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Fri, 23 Oct 2020 12:54:54 +1000
+Subject: [PATCH libinput 2/5] evdev: localize two variables during quirks
+ handling
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+(cherry picked from commit 30502dee1e925c270429669c4acd293645c3cba3)
+---
+ src/evdev.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/evdev.c b/src/evdev.c
+index e6a00199..2f6c7447 100644
+--- a/src/evdev.c
++++ b/src/evdev.c
+@@ -2084,11 +2084,9 @@ evdev_pre_configure_model_quirks(struct evdev_device *device)
+ 	}
+ 
+ 	if (quirks_get_tuples(q, QUIRK_ATTR_EVENT_CODE_DISABLE, &t)) {
+-		int type, code;
+-
+ 		for (size_t i = 0; i < t->ntuples; i++) {
+-			type = t->tuples[i].first;
+-			code = t->tuples[i].second;
++			int type = t->tuples[i].first;
++			int code = t->tuples[i].second;
+ 
+ 			if (code == EVENT_CODE_UNDEFINED)
+ 				libevdev_disable_event_type(device->evdev,
+-- 
+2.31.1
+
