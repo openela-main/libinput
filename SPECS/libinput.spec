@@ -5,7 +5,7 @@
 
 Name:           libinput
 Version:        1.19.3
-Release:        4%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
+Release:        5%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
 Summary:        Input device library
 
 License:        MIT
@@ -21,6 +21,8 @@ Source0:        http://www.freedesktop.org/software/libinput/libinput-%{version}
 Patch0001:	0001-evdev-strip-the-device-name-of-format-directives.patch
 Patch0002:	0001-quirks-add-quirks-for-Dell-Precision5680-Touchpad.patch
 Patch0003:	0001-quirks-Dell-Mayabay-Pressure-Pad.patch
+Patch0004:	0001-quirks-add-quirk-for-Dell-Haptics-Touchpad.patch
+Patch0005:	0001-quirks-add-quirks-for-Dell-laptop-with-Goodix-Touchp.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -150,6 +152,9 @@ pathfix.py -i %{__python3} -p -n $(git grep -l  '#!/usr/bin/.*python3')
 %{_mandir}/man1/libinput-test-suite.1*
 
 %changelog
+* Mon Feb 24 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.19.3-5
+- Add quirks for four more dell touchpads (RHEL-69798)
+
 * Thu Jul 06 2023 Peter Hutterer <peter.hutterer@redhat.com> - 1.19.3-4
 - Add quirk for the Mayabay pressurepad (#2219245, #2219812)
 
