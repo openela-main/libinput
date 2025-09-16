@@ -5,7 +5,7 @@
 
 Name:           libinput
 Version:        1.19.3
-Release:        5%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
+Release:        7%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
 Summary:        Input device library
 
 License:        MIT
@@ -19,10 +19,12 @@ Source0:        http://www.freedesktop.org/software/libinput/libinput-%{version}
 %endif
 
 Patch0001:	0001-evdev-strip-the-device-name-of-format-directives.patch
-Patch0002:	0001-quirks-add-quirks-for-Dell-Precision5680-Touchpad.patch
-Patch0003:	0001-quirks-Dell-Mayabay-Pressure-Pad.patch
-Patch0004:	0001-quirks-add-quirk-for-Dell-Haptics-Touchpad.patch
-Patch0005:	0001-quirks-add-quirks-for-Dell-laptop-with-Goodix-Touchp.patch
+Patch0002:	0002-quirks-add-quirks-for-Dell-Precision5680-Touchpad.patch
+Patch0003:	0003-quirks-Dell-Mayabay-Pressure-Pad.patch
+Patch0004:	0004-quirks-add-quirk-for-Dell-Haptics-Touchpad.patch
+Patch0005:	0005-quirks-add-quirks-for-Dell-laptop-with-Goodix-Touchp.patch
+Patch0006:	0006-RHEL-map-dials-to-rings-on-the-Intuos-Pro-3rd-Gen-de.patch
+Patch0007:	0007-pad-don-t-assert-when-unable-to-find-the-mode-group-.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -152,6 +154,13 @@ pathfix.py -i %{__python3} -p -n $(git grep -l  '#!/usr/bin/.*python3')
 %{_mandir}/man1/libinput-test-suite.1*
 
 %changelog
+* Mon Aug 04 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.19.3-7
+- Fix crash when the Wacom Intuos Pro 3rd gen sends absolute wheel events
+
+* Fri Jul 25 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.19.3-6
+- Add support for the Wacom Intuos Pro (RHEL-105483)
+- Rename existing patches for better order clarity
+
 * Mon Feb 24 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.19.3-5
 - Add quirks for four more dell touchpads (RHEL-69798)
 

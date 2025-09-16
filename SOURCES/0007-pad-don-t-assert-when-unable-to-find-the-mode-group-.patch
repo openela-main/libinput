@@ -1,0 +1,134 @@
+From 35c2d7ebba6862be0531a588143522ebcd6170eb Mon Sep 17 00:00:00 2001
+From: whot <whot@localhost.localdomain>
+Date: Mon, 4 Aug 2025 13:43:54 +1000
+Subject: [PATCH] pad: don't assert when unable to find the mode group, just
+ discard
+
+Instead of a hard assert if we fail to find the mode group for the given
+ring/dial/strip let's just log an error and discard the event.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ src/evdev-tablet-pad.c | 58 +++++++++++++++++++++++-------------------
+ src/evdev-tablet-pad.h |  1 +
+ 2 files changed, 33 insertions(+), 26 deletions(-)
+
+diff --git a/src/evdev-tablet-pad.c b/src/evdev-tablet-pad.c
+index 4895e90ae188..782b04be00cd 100644
+--- a/src/evdev-tablet-pad.c
++++ b/src/evdev-tablet-pad.c
+@@ -270,8 +270,9 @@ pad_ring_get_mode_group(struct pad_dispatch *pad,
+ 			return group;
+ 	}
+ 
+-	assert(!"Unable to find ring mode group");
+-
++	evdev_log_bug_libinput_ratelimit(pad->device,
++					 &pad->modes.group_not_found,
++					 "Unable to find mode group for ring %d\n", ring);
+ 	return NULL;
+ }
+ 
+@@ -337,12 +338,13 @@ pad_check_notify_axes(struct pad_dispatch *pad,
+ 			degrees = fmod(degrees + 180, 360);
+ 
+ 		group = pad_ring_get_mode_group(pad, 0);
+-		tablet_pad_notify_ring(base,
+-				       time,
+-				       0,
+-				       degrees,
+-				       LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN,
+-				       group);
++		if (group)
++			tablet_pad_notify_ring(base,
++					       time,
++					       0,
++					       degrees,
++					       LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN,
++					       group);
+ 	}
+ 
+ 	if (pad->changed_axes & PAD_AXIS_DIAL2 && pad->dials.map_to_ring) {
+@@ -351,12 +353,13 @@ pad_check_notify_axes(struct pad_dispatch *pad,
+ 			degrees = fmod(degrees + 180, 360);
+ 
+ 		group = pad_ring_get_mode_group(pad, 1);
+-		tablet_pad_notify_ring(base,
+-				       time,
+-				       1,
+-				       degrees,
+-				       LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN,
+-				       group);
++		if (group)
++			tablet_pad_notify_ring(base,
++					       time,
++					       1,
++					       degrees,
++					       LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN,
++					       group);
+ 	}
+ 
+ 	if (pad->changed_axes & PAD_AXIS_RING1) {
+@@ -365,12 +368,13 @@ pad_check_notify_axes(struct pad_dispatch *pad,
+ 			value = -1.0;
+ 
+ 		group = pad_ring_get_mode_group(pad, 0);
+-		tablet_pad_notify_ring(base,
+-				       time,
+-				       0,
+-				       value,
+-				       LIBINPUT_TABLET_PAD_RING_SOURCE_FINGER,
+-				       group);
++		if (group)
++			tablet_pad_notify_ring(base,
++					       time,
++					       0,
++					       value,
++					       LIBINPUT_TABLET_PAD_RING_SOURCE_FINGER,
++					       group);
+ 	}
+ 
+ 	if (pad->changed_axes & PAD_AXIS_RING2) {
+@@ -379,12 +383,13 @@ pad_check_notify_axes(struct pad_dispatch *pad,
+ 			value = -1.0;
+ 
+ 		group = pad_ring_get_mode_group(pad, 1);
+-		tablet_pad_notify_ring(base,
+-				       time,
+-				       1,
+-				       value,
+-				       LIBINPUT_TABLET_PAD_RING_SOURCE_FINGER,
+-				       group);
++		if (group)
++			tablet_pad_notify_ring(base,
++					       time,
++					       1,
++					       value,
++					       LIBINPUT_TABLET_PAD_RING_SOURCE_FINGER,
++					       group);
+ 	}
+ 
+ 	if (pad->changed_axes & PAD_AXIS_STRIP1) {
+@@ -774,6 +779,7 @@ pad_init(struct pad_dispatch *pad, struct evdev_device *device)
+ 	pad->device = device;
+ 	pad->status = PAD_NONE;
+ 	pad->changed_axes = PAD_AXIS_NONE;
++	ratelimit_init(&pad->modes.group_not_found, s2us(60 * 60), 2);
+ 
+ 	/* RHEL dial-to-ring special */
+ 	pad->dials.map_to_ring = evdev_device_has_model_quirk(device, QUIRK_MODEL_WACOM_INTUOS_PRO_3RD);
+diff --git a/src/evdev-tablet-pad.h b/src/evdev-tablet-pad.h
+index c9c23583c714..c5aab243aab8 100644
+--- a/src/evdev-tablet-pad.h
++++ b/src/evdev-tablet-pad.h
+@@ -93,6 +93,7 @@ struct pad_dispatch {
+ 
+ 	struct {
+ 		struct list mode_group_list;
++		struct ratelimit group_not_found;
+ 	} modes;
+ };
+ 
+-- 
+2.50.1
+
