@@ -1,0 +1,39 @@
+From 54bbba8b2e35b6ceefed3ca0fe8c18e5b9a0759b Mon Sep 17 00:00:00 2001
+From: wangyafei <wangyafei@goodix.com>
+Date: Tue, 21 Jan 2025 17:17:05 +0800
+Subject: [PATCH] quirks: add quirks for Dell laptop with Goodix Touchpad.
+
+This touchpad is a pressure pad and needs the pressure
+handling disable.
+
+Signed-off-by: Charles Wang <charles.goodix@gmail.com>
+Part-of: <https://gitlab.freedesktop.org/libinput/libinput/-/merge_requests/1130>
+(cherry picked from commit 3cf6c91fff5b84757792810c4016144443581da6)
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ quirks/50-system-dell.quirks | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/quirks/50-system-dell.quirks b/quirks/50-system-dell.quirks
+index a3492eb40e75..8110651e466f 100644
+--- a/quirks/50-system-dell.quirks
++++ b/quirks/50-system-dell.quirks
+@@ -153,3 +153,15 @@ MatchBus=i2c
+ MatchVendor=0x06CB
+ MatchProduct=0xCFF9
+ ModelPressurePad=1
++
++[Dell laptop 14 Goodix touchpad]
++MatchBus=i2c
++MatchVendor=0x27C6
++MatchProduct=0x0F61
++ModelPressurePad=1
++
++[Dell laptop 16 Goodix touchpad]
++MatchBus=i2c
++MatchVendor=0x27C6
++MatchProduct=0x0F62
++ModelPressurePad=1
+-- 
+2.50.1
+

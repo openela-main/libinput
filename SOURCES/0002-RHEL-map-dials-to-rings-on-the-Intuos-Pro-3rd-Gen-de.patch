@@ -1,0 +1,466 @@
+From 6b3b71d0ddd27207ef4c52c72080ba10b672fa5a Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Tue, 22 Jul 2025 14:22:34 +1000
+Subject: [PATCH] RHEL: map dials to rings on the Intuos Pro 3rd Gen devices
+
+These devices have relative dials but our userspace stack
+(mutter/gnome-shell and Wayland) do not have support for relative dials.
+This means they can't be configured and any events cannot be
+passed through to the client.
+
+Work around this for this set of devices by mapping the relative dials
+to a ring. This isn't a perfect emulation - the last value is simply
+remembered but we only get so much data from a dial.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ meson.build                                   |  1 +
+ quirks/30-vendor-wacom.quirks                 | 42 +++++++++
+ src/evdev-tablet-pad.c                        | 89 ++++++++++++++++---
+ src/evdev-tablet-pad.h                        |  5 ++
+ src/quirks.c                                  |  1 +
+ src/quirks.h                                  |  1 +
+ test/litest-device-wacom-intuos-pro-3rd-pad.c | 87 ++++++++++++++++++
+ test/litest.h                                 |  1 +
+ test/test-tablet.c                            | 59 ++++++++++++
+ 9 files changed, 276 insertions(+), 10 deletions(-)
+ create mode 100644 test/litest-device-wacom-intuos-pro-3rd-pad.c
+
+diff --git a/meson.build b/meson.build
+index 3f0583e5879f..f7fbe8222eea 100644
+--- a/meson.build
++++ b/meson.build
+@@ -822,6 +822,7 @@ if get_option('tests')
+ 		'test/litest-device-wacom-cintiq-pro-16-pen.c',
+ 		'test/litest-device-wacom-ekr.c',
+ 		'test/litest-device-wacom-hid4800-pen.c',
++		'test/litest-device-wacom-intuos-pro-3rd-pad.c',
+ 		'test/litest-device-wacom-intuos3-pad.c',
+ 		'test/litest-device-wacom-intuos5-finger.c',
+ 		'test/litest-device-wacom-intuos5-pad.c',
+diff --git a/quirks/30-vendor-wacom.quirks b/quirks/30-vendor-wacom.quirks
+index 51211684c821..79c860efca39 100644
+--- a/quirks/30-vendor-wacom.quirks
++++ b/quirks/30-vendor-wacom.quirks
+@@ -33,3 +33,45 @@ MatchBus=usb
+ MatchVendor=0x2D1F
+ MatchProduct=0x524C
+ AttrEventCode=-ABS_TILT_X;-ABS_TILT_Y;
++
++[Wacom Intuos Pro 3rd L (0x03F9)]
++MatchUdevType=tablet
++MatchVendor=0x056A
++MatchProduct=0x03F9
++ModelWacomIntuosPro3rd=1
++
++[Wacom Intuos Pro 3rd L (0x03FA)]
++MatchUdevType=tablet
++MatchVendor=0x056A
++MatchProduct=0x03FA
++ModelWacomIntuosPro3rd=1
++
++[Wacom Intuos Pro 3rd L (0x0401)]
++MatchUdevType=tablet
++MatchVendor=0x056A
++MatchProduct=0x0401
++ModelWacomIntuosPro3rd=1
++
++[Wacom Intuos Pro 3rd M (0x03F7)]
++MatchUdevType=tablet
++MatchVendor=0x056A
++MatchProduct=0x03F7
++ModelWacomIntuosPro3rd=1
++
++[Wacom Intuos Pro 3rd M (0x03F9)]
++MatchUdevType=tablet
++MatchVendor=0x056A
++MatchProduct=0x03F9
++ModelWacomIntuosPro3rd=1
++
++[Wacom Intuos Pro 3rd S (0x03F6)]
++MatchUdevType=tablet
++MatchVendor=0x056A
++MatchProduct=0x03F6
++ModelWacomIntuosPro3rd=1
++
++[Wacom Intuos Pro 3rd S (0x03F5)]
++MatchUdevType=tablet
++MatchVendor=0x056A
++MatchProduct=0x03F5
++ModelWacomIntuosPro3rd=1
+diff --git a/src/evdev-tablet-pad.c b/src/evdev-tablet-pad.c
+index 90614c5dae91..64d0eae2b603 100644
+--- a/src/evdev-tablet-pad.c
++++ b/src/evdev-tablet-pad.c
+@@ -317,6 +317,30 @@ pad_strip_get_mode_group(struct pad_dispatch *pad,
+ 	return NULL;
+ }
+ 
++static double
++pad_ring_to_dial(double *current_value, double delta)
++{
++	/* The dial value is in v120 range but needs to be mapped to the 0..360
++	 * degrees that the ring provides.
++	 *
++	 * Let's say one wheel detent (v120) is 15 degrees, this gives us 24
++	 * lores wheel clicks to go the full 360 degrees circle.
++	 * If we have 24 clicks per 360 that means our max value is 120 * 24
++	 * after which we wrap around.
++	 */
++	const int dial_degrees = 15;
++	const int detents_per_360 = 360 / dial_degrees;
++	const int wrap_threshold = 120 * detents_per_360;
++
++	double abs_value = *current_value + delta;
++	abs_value = fmod(abs_value + wrap_threshold, wrap_threshold);
++	*current_value = abs_value;
++
++	double degrees = abs_value * dial_degrees / 120;
++
++	return degrees;
++}
++
+ static void
+ pad_check_notify_axes(struct pad_dispatch *pad,
+ 		      struct evdev_device *device,
+@@ -335,7 +359,7 @@ pad_check_notify_axes(struct pad_dispatch *pad,
+ 
+ 	/* Unlike the ring axis we don't get an event when we release
+ 	 * so we can't set a source */
+-	if (pad->changed_axes & PAD_AXIS_DIAL1) {
++	if (pad->changed_axes & PAD_AXIS_DIAL1 && !pad->dials.map_to_ring) {
+ 		group = pad_dial_get_mode_group(pad, 0);
+ 		tablet_pad_notify_dial(base,
+ 				       time,
+@@ -344,7 +368,7 @@ pad_check_notify_axes(struct pad_dispatch *pad,
+ 				       group);
+ 	}
+ 
+-	if (pad->changed_axes & PAD_AXIS_DIAL2) {
++	if (pad->changed_axes & PAD_AXIS_DIAL2 && !pad->dials.map_to_ring) {
+ 		group = pad_dial_get_mode_group(pad, 1);
+ 		tablet_pad_notify_dial(base,
+ 				       time,
+@@ -353,6 +377,34 @@ pad_check_notify_axes(struct pad_dispatch *pad,
+ 				       group);
+ 	}
+ 
++	if (pad->changed_axes & PAD_AXIS_DIAL1 && pad->dials.map_to_ring) {
++		double degrees = pad_ring_to_dial(&pad->dials.abs_dial1_value, pad->dials.dial1);
++		if (device->left_handed.enabled)
++			degrees = fmod(degrees + 180, 360);
++
++		group = pad_ring_get_mode_group(pad, 0);
++		tablet_pad_notify_ring(base,
++				       time,
++				       0,
++				       degrees,
++				       LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN,
++				       group);
++	}
++
++	if (pad->changed_axes & PAD_AXIS_DIAL2 && pad->dials.map_to_ring) {
++		double degrees = pad_ring_to_dial(&pad->dials.abs_dial2_value, pad->dials.dial2);
++		if (device->left_handed.enabled)
++			degrees = fmod(degrees + 180, 360);
++
++		group = pad_ring_get_mode_group(pad, 1);
++		tablet_pad_notify_ring(base,
++				       time,
++				       1,
++				       degrees,
++				       LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN,
++				       group);
++	}
++
+ 	if (pad->changed_axes & PAD_AXIS_RING1) {
+ 		value = pad_handle_ring(pad, device, ABS_WHEEL);
+ 		if (send_finger_up)
+@@ -780,6 +832,9 @@ pad_init(struct pad_dispatch *pad, struct evdev_device *device)
+ 	pad->status = PAD_NONE;
+ 	pad->changed_axes = PAD_AXIS_NONE;
+ 
++	/* RHEL dial-to-ring special */
++	pad->dials.map_to_ring = evdev_device_has_model_quirk(device, QUIRK_MODEL_WACOM_INTUOS_PRO_3RD);
++
+         /* We expect the kernel to either give us both axes as hires or neither.
+ 	 * Getting one is a kernel bug we don't need to care about */
+         pad->dials.has_hires_dial = libevdev_has_event_code(device->evdev, EV_REL, REL_WHEEL_HI_RES) ||
+@@ -886,18 +941,15 @@ evdev_device_tablet_pad_get_num_buttons(struct evdev_device *device)
+ 	return pad->nbuttons;
+ }
+ 
+-int
+-evdev_device_tablet_pad_get_num_dials(struct evdev_device *device)
++static int
++count_dials(struct libevdev *evdev)
+ {
+ 	int ndials = 0;
+ 
+-	if (!(device->seat_caps & EVDEV_DEVICE_TABLET_PAD))
+-		return -1;
+-
+-	if (libevdev_has_event_code(device->evdev, EV_REL, REL_WHEEL) ||
+-	    libevdev_has_event_code(device->evdev, EV_REL, REL_DIAL)) {
++	if (libevdev_has_event_code(evdev, EV_REL, REL_WHEEL) ||
++	    libevdev_has_event_code(evdev, EV_REL, REL_DIAL)) {
+ 		ndials++;
+-		if (libevdev_has_event_code(device->evdev,
++		if (libevdev_has_event_code(evdev,
+ 					    EV_REL,
+ 					    REL_HWHEEL))
+ 			ndials++;
+@@ -906,6 +958,19 @@ evdev_device_tablet_pad_get_num_dials(struct evdev_device *device)
+ 	return ndials;
+ }
+ 
++int
++evdev_device_tablet_pad_get_num_dials(struct evdev_device *device)
++{
++	if (!(device->seat_caps & EVDEV_DEVICE_TABLET_PAD))
++		return -1;
++
++	/* RHEL dial-to-ring special */
++	if (evdev_device_has_model_quirk(device, QUIRK_MODEL_WACOM_INTUOS_PRO_3RD))
++		return 0;
++
++	return count_dials(device->evdev);
++}
++
+ int
+ evdev_device_tablet_pad_get_num_rings(struct evdev_device *device)
+ {
+@@ -914,6 +979,10 @@ evdev_device_tablet_pad_get_num_rings(struct evdev_device *device)
+ 	if (!(device->seat_caps & EVDEV_DEVICE_TABLET_PAD))
+ 		return -1;
+ 
++	/* RHEL dial-to-ring special */
++	if (evdev_device_has_model_quirk(device, QUIRK_MODEL_WACOM_INTUOS_PRO_3RD))
++		return count_dials(device->evdev);
++
+ 	if (libevdev_has_event_code(device->evdev, EV_ABS, ABS_WHEEL)) {
+ 		nrings++;
+ 		if (libevdev_has_event_code(device->evdev,
+diff --git a/src/evdev-tablet-pad.h b/src/evdev-tablet-pad.h
+index fe7aa8b79ff0..c9c23583c714 100644
+--- a/src/evdev-tablet-pad.h
++++ b/src/evdev-tablet-pad.h
+@@ -79,6 +79,11 @@ struct pad_dispatch {
+ 		bool has_hires_dial;
+ 		double dial1;
+ 		double dial2;
++
++		/* RHEL: map the dial to ring on selected devices */
++		bool map_to_ring;
++		double abs_dial1_value;
++		double abs_dial2_value;
+ 	} dials;
+ 
+ 	struct {
+diff --git a/src/quirks.c b/src/quirks.c
+index 01065d5eaa21..1151caac1d9d 100644
+--- a/src/quirks.c
++++ b/src/quirks.c
+@@ -272,6 +272,7 @@ quirk_get_name(enum quirk q)
+ 	case QUIRK_MODEL_TOUCHPAD_PHANTOM_CLICKS:	return "ModelTouchpadPhantomClicks";
+ 	case QUIRK_MODEL_TRACKBALL:			return "ModelTrackball";
+ 	case QUIRK_MODEL_WACOM_TOUCHPAD:		return "ModelWacomTouchpad";
++	case QUIRK_MODEL_WACOM_INTUOS_PRO_3RD:		return "ModelWacomIntuosPro3rd";
+ 	case QUIRK_MODEL_PRESSURE_PAD:			return "ModelPressurePad";
+ 
+ 	case QUIRK_ATTR_SIZE_HINT:			return "AttrSizeHint";
+diff --git a/src/quirks.h b/src/quirks.h
+index 340d04635b9f..ff0ac94e424f 100644
+--- a/src/quirks.h
++++ b/src/quirks.h
+@@ -86,6 +86,7 @@ enum quirk {
+ 	QUIRK_MODEL_TOUCHPAD_VISIBLE_MARKER,
+ 	QUIRK_MODEL_TRACKBALL,
+ 	QUIRK_MODEL_WACOM_TOUCHPAD,
++	QUIRK_MODEL_WACOM_INTUOS_PRO_3RD,
+ 	QUIRK_MODEL_PRESSURE_PAD,
+ 	QUIRK_MODEL_TOUCHPAD_PHANTOM_CLICKS,
+ 
+diff --git a/test/litest-device-wacom-intuos-pro-3rd-pad.c b/test/litest-device-wacom-intuos-pro-3rd-pad.c
+new file mode 100644
+index 000000000000..d5e54d46db6b
+--- /dev/null
++++ b/test/litest-device-wacom-intuos-pro-3rd-pad.c
+@@ -0,0 +1,87 @@
++/*
++ * Copyright © 2016 Red Hat, Inc.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++#include "config.h"
++
++#include "litest.h"
++#include "litest-int.h"
++
++static struct input_event down[] = {
++	{ .type = -1, .code = -1 },
++};
++
++static struct input_event move[] = {
++	{ .type = -1, .code = -1 },
++};
++
++static struct litest_device_interface interface = {
++	.touch_down_events = down,
++	.touch_move_events = move,
++};
++
++static struct input_absinfo absinfo[] = {
++	{ ABS_X, 0, 1, 0, 0, 0 },
++	{ ABS_Y, 0, 1, 0, 0, 0 },
++	{ ABS_MISC, 0, 0, 0, 0, 0 },
++	{ .value = -1 },
++};
++
++static struct input_id input_id = {
++	.bustype = 0x3,
++	.vendor = 0x56a,
++	.product = 0x3f9,
++};
++
++static int events[] = {
++	EV_KEY, BTN_0,
++	EV_KEY, BTN_1,
++	EV_KEY, BTN_2,
++	EV_KEY, BTN_3,
++	EV_KEY, BTN_4,
++	EV_KEY, BTN_5,
++	EV_KEY, BTN_6,
++	EV_KEY, BTN_7,
++	EV_KEY, BTN_8,
++	EV_KEY, BTN_9,
++	EV_KEY, BTN_STYLUS,
++	EV_REL, REL_WHEEL,
++	EV_REL, REL_HWHEEL,
++	EV_REL, REL_WHEEL_HI_RES,
++	EV_REL, REL_HWHEEL_HI_RES,
++	-1, -1,
++};
++
++TEST_DEVICE("wacom-intuos3-pad",
++	.type = LITEST_WACOM_INTUOS_PRO_3RD_PAD,
++	.features = LITEST_TABLET_PAD, /* RHEL: not LITEST_DIAL because it's special */
++	.interface = &interface,
++
++	.name = "Wacom Intuos Pro L Pad",
++	.id = &input_id,
++	.events = events,
++	.absinfo = absinfo,
++	.udev_properties = {
++		{ "ID_INPUT_TABLET_PAD", "1" },
++		{ NULL },
++	},
++)
+diff --git a/test/litest.h b/test/litest.h
+index 6108be50a4c1..93bea19dcd3e 100644
+--- a/test/litest.h
++++ b/test/litest.h
+@@ -352,6 +352,7 @@ enum litest_device_type {
+ 	LITEST_WACOM_EKR,
+ 	LITEST_WACOM_HID4800_PEN,
+ 	LITEST_WACOM_INTUOS,
++	LITEST_WACOM_INTUOS_PRO_3RD_PAD,
+ 	LITEST_WACOM_INTUOS3_PAD,
+ 	LITEST_WACOM_INTUOS5_PAD,
+ 	LITEST_WACOM_ISDV4,
+diff --git a/test/test-tablet.c b/test/test-tablet.c
+index b652dcfd5345..ae88c844be91 100644
+--- a/test/test-tablet.c
++++ b/test/test-tablet.c
+@@ -6560,6 +6560,62 @@ START_TEST(tablet_smoothing)
+ }
+ END_TEST
+ 
++START_TEST(tablet_dial_to_ring)
++{
++	struct litest_device *dev = litest_current_device();
++	struct libinput *li = dev->libinput;
++	struct libinput_event *event;
++	struct libinput_event_tablet_pad *pev;
++
++	/* The range is a bitmask of ring, direction, left-handed */
++	int testcase = _i; /* ranged test */
++	unsigned int ring = testcase & 0x1;
++	int direction = testcase & 0x2 ? -1 : 1;
++	bool left_handed = !!(testcase & 0x4);
++
++	litest_assert_int_lt(testcase, 8);
++
++	const int degrees_per_detent = 15;
++
++	litest_assert_int_eq(libinput_device_tablet_pad_get_num_dials(dev->libinput_device), 0);
++	litest_assert_int_eq(libinput_device_tablet_pad_get_num_rings(dev->libinput_device), 2);
++
++	/* The dial-to-ring affected devices do not support left-handed so let's
++	 * make sure setting left-handed a) doesn't work and b) the setting
++	 * doesn't affect anything.
++	 */
++	enum libinput_config_status rc = libinput_device_config_left_handed_set(dev->libinput_device, left_handed);
++	litest_assert_int_eq(rc, (unsigned)LIBINPUT_CONFIG_STATUS_UNSUPPORTED);
++
++	litest_drain_events(li);
++
++	double expected = 0.0;
++	for (size_t count = 0; count < 36; count++) { /* 24 per 360 so let's do 1.5 rotations */
++		if (ring == 0) {
++			/* REL_WHEEL is inverted to expectations */
++			litest_event(dev, EV_REL, REL_WHEEL, 1 * -direction);
++			litest_event(dev, EV_REL, REL_WHEEL_HI_RES, 120 * -direction);
++			litest_event(dev, EV_SYN, SYN_REPORT, 0);
++		} else {
++			litest_event(dev, EV_REL, REL_HWHEEL, 1 * direction);
++			litest_event(dev, EV_REL, REL_HWHEEL_HI_RES, 120 * direction);
++			litest_event(dev, EV_SYN, SYN_REPORT, 0);
++		}
++
++		libinput_dispatch(li);
++
++		expected += 360 + direction * degrees_per_detent;
++		expected = fmod(expected, 360);
++
++		event = libinput_get_event(li);
++		pev = litest_is_pad_ring_event(event, ring, LIBINPUT_TABLET_PAD_RING_SOURCE_UNKNOWN);
++		double value = libinput_event_tablet_pad_get_ring_position(pev);
++		litest_assert_double_eq(value, expected);
++		libinput_event_destroy(event);
++	}
++}
++END_TEST
++
+ TEST_COLLECTION(tablet)
+ {
+ 	struct range with_timeout = { 0, 2 };
+@@ -6704,4 +6760,7 @@ TEST_COLLECTION(tablet)
+ 	litest_add_ranged_for_device(huion_static_btn_tool_pen_disable_quirk_on_prox_out, LITEST_HUION_TABLET, &with_timeout);
+ 
+ 	litest_add_for_device(tablet_smoothing, LITEST_WACOM_HID4800_PEN);
++
++	struct range dial_ring_cases = { 0, 8 };
++	litest_add_ranged_for_device(tablet_dial_to_ring, LITEST_WACOM_INTUOS_PRO_3RD_PAD, &dial_ring_cases);
+ }
+-- 
+2.50.1
+

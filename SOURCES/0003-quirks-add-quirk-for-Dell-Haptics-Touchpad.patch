@@ -1,0 +1,38 @@
+From ac3b94975742c06bbe1eb614edb251f2465b2dbb Mon Sep 17 00:00:00 2001
+From: Marge Yang <marge.yang@synaptics.corp-partner.google.com>
+Date: Tue, 21 Jan 2025 07:26:41 +0000
+Subject: [PATCH] quirks: add quirk for Dell Haptics Touchpad.
+
+This Touchpad is a pressure pad and needs the pressure
+handling disable.
+
+Part-of: <https://gitlab.freedesktop.org/libinput/libinput/-/merge_requests/1127>
+(cherry picked from commit af0e9a23c32d086fece58a95cb720994ad02d0b4)
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ quirks/50-system-dell.quirks | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/quirks/50-system-dell.quirks b/quirks/50-system-dell.quirks
+index f46ab2b3c50e..a3492eb40e75 100644
+--- a/quirks/50-system-dell.quirks
++++ b/quirks/50-system-dell.quirks
+@@ -141,3 +141,15 @@ MatchProduct=0x1063
+ MatchUdevType=touchpad
+ MatchDMIModalias=dmi:*svnDellInc.:pnPrecision5480*
+ ModelTouchpadVisibleMarker=0
++
++[Dell laptop 14 Synaptics touchpad]
++MatchBus=i2c
++MatchVendor=0x06CB
++MatchProduct=0xCFF8
++ModelPressurePad=1
++
++[Dell laptop 16 Synaptics touchpad]
++MatchBus=i2c
++MatchVendor=0x06CB
++MatchProduct=0xCFF9
++ModelPressurePad=1
+-- 
+2.50.1
+
