@@ -5,7 +5,7 @@
 
 Name:           libinput
 Version:        1.19.3
-Release:        7%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
+Release:        8%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
 Summary:        Input device library
 
 License:        MIT
@@ -25,6 +25,8 @@ Patch0004:	0004-quirks-add-quirk-for-Dell-Haptics-Touchpad.patch
 Patch0005:	0005-quirks-add-quirks-for-Dell-laptop-with-Goodix-Touchp.patch
 Patch0006:	0006-RHEL-map-dials-to-rings-on-the-Intuos-Pro-3rd-Gen-de.patch
 Patch0007:	0007-pad-don-t-assert-when-unable-to-find-the-mode-group-.patch
+Patch0008:	0008-tablet-handle-BTN_STYLUS3.patch
+Patch0009:	0009-test-fix-uinput-creation-for-the-slotted-devices-wit.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -154,6 +156,9 @@ pathfix.py -i %{__python3} -p -n $(git grep -l  '#!/usr/bin/.*python3')
 %{_mandir}/man1/libinput-test-suite.1*
 
 %changelog
+* Tue Feb 10 2026 Peter Hutterer <peter.hutterer@redhat.com> - 1.19.3-8
+- Handle BTN_STYLUS3 (RHEL-147703)
+
 * Mon Aug 04 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.19.3-7
 - Fix crash when the Wacom Intuos Pro 3rd gen sends absolute wheel events
 
