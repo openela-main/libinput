@@ -4,8 +4,8 @@
 %global gitversion 58abea394
 
 Name:           libinput
-Version:        1.26.1
-Release:        5%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
+Version:        1.30.1
+Release:        1%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
 Summary:        Input device library
 
 # SPDX
@@ -19,10 +19,7 @@ Source2:        commitid
 Source0:        https://gitlab.freedesktop.org/libinput/libinput/-/archive/%{version}/libinput-%{version}.tar.bz2
 %endif
 
-Patch0001:      0001-tablet-Remove-unnecessary-scale-factor-on-REL_HWHEEL.patch
-Patch0002:      0002-RHEL-map-dials-to-rings-on-the-Intuos-Pro-3rd-Gen-de.patch
-Patch0003:      0003-quirks-add-quirk-for-Dell-Haptics-Touchpad.patch
-Patch0004:      0004-quirks-add-quirks-for-Dell-laptop-with-Goodix-Touchp.patch
+Patch0002:      0001-RHEL-map-dials-to-rings-on-the-Intuos-Pro-3rd-Gen-de.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -79,6 +76,7 @@ intended to be run by users.
        -Ddocumentation=false \
        -Dtests=true \
        -Dinstall-tests=true \
+       -Dlua-plugins=disabled \
        -Dudev-dir=%{udevdir}
 %meson_build
 
@@ -124,6 +122,7 @@ intended to be run by users.
 %{_libexecdir}/libinput/libinput-analyze-recording
 %{_libexecdir}/libinput/libinput-analyze-touch-down-state
 %{_libexecdir}/libinput/libinput-debug-tablet
+%{_libexecdir}/libinput/libinput-debug-tablet-pad
 %{_libexecdir}/libinput/libinput-list-kernel-devices
 %{_libexecdir}/libinput/libinput-measure
 %{_libexecdir}/libinput/libinput-measure-fuzz
@@ -140,6 +139,7 @@ intended to be run by users.
 %{_mandir}/man1/libinput-analyze-recording.1*
 %{_mandir}/man1/libinput-analyze-touch-down-state.1*
 %{_mandir}/man1/libinput-debug-tablet.1*
+%{_mandir}/man1/libinput-debug-tablet-pad.1*
 %{_mandir}/man1/libinput-list-kernel-devices.1*
 %{_mandir}/man1/libinput-measure.1*
 %{_mandir}/man1/libinput-measure-fuzz.1*
@@ -162,6 +162,14 @@ intended to be run by users.
 
 
 %changelog
+* Wed Dec 17 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.30.1-1
+- libinput 1.30.1
+  Resolves: RHEL-136390
+
+* Wed Nov 05 2025 Florian Müllner <fmuellner@redhat.com> - 1.28.1-1
+- libinput 1.28.1
+  Resolves: RHEL-126613
+
 * Fri Aug 01 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.26.1-5
 - Add quirks for four Dell pressure pads (RHEL-106932)
 
