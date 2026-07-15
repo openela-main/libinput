@@ -1,0 +1,116 @@
+From b2bde9504d42a5976d76e1f27c640dc561fbd99b Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Mon, 1 Jun 2026 10:48:24 +1000
+Subject: [PATCH] libinput-device-group: sanitize phys before printing it
+
+A malicious uinput device could set the phys value (via UI_SET_PHYS)
+to contain a '\n'. When the value is printed as part of the device group
+the udev rules will interpret it as separate property.
+
+Depending on the property this can cause local privilege escalation.
+
+Closes #1296
+
+Found-by: Csome
+(cherry picked from commit 76f0d8a7f57e2868882864b4611281f12f704b55)
+
+Part-of: <https://gitlab.freedesktop.org/libinput/libinput/-/merge_requests/1489>
+---
+ udev/libinput-device-group.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/udev/libinput-device-group.c b/udev/libinput-device-group.c
+index cdb38c0beb98..f9188406d4de 100644
+--- a/udev/libinput-device-group.c
++++ b/udev/libinput-device-group.c
+@@ -102,61 +102,63 @@ wacom_handle_ekr(struct udev_device *device,
+ 	udev = udev_device_get_udev(device);
+ 	e = udev_enumerate_new(udev);
+ 	udev_enumerate_add_match_subsystem(e, "input");
+ 	udev_enumerate_add_match_sysname(e, "input*");
+ 	udev_enumerate_scan_devices(e);
+ 
+ 	udev_list_entry_foreach(entry, udev_enumerate_get_list_entry(e)) {
+ 		struct udev_device *d;
+-		const char *path, *phys;
++		_autofree_ char *phys = NULL;
++		const char *path;
+ 		const char *pidstr, *vidstr;
+ 		int pid, vid, dist;
+ 
+ 		/* Find and use the closest Wacom device on the system,
+ 		 * relying on wacom_handle_paired() to fix our ID later
+ 		 * if needed.
+ 		 */
+ 		path = udev_list_entry_get_name(entry);
+ 		d = udev_device_new_from_syspath(udev, path);
+ 		if (!d)
+ 			continue;
+ 
+ 		vidstr = udev_device_get_property_value(d, "ID_VENDOR_ID");
+ 		pidstr = udev_device_get_property_value(d, "ID_MODEL_ID");
+-		phys = udev_device_get_sysattr_value(d, "phys");
++		phys = str_sanitize(udev_device_get_sysattr_value(d, "phys"));
+ 
+ 		if (vidstr && pidstr && phys && safe_atoi_base(vidstr, &vid, 16) &&
+ 		    safe_atoi_base(pidstr, &pid, 16) && vid == VENDOR_ID_WACOM &&
+ 		    pid != PRODUCT_ID_WACOM_EKR) {
+ 			dist = find_tree_distance(device, d);
+ 			if (dist > 0 && (dist < best_dist || best_dist < 0)) {
+ 				*vendor_id = vid;
+ 				*product_id = pid;
+ 				best_dist = dist;
+ 
+ 				free(*phys_attr);
+-				*phys_attr = safe_strdup(phys);
++				*phys_attr = steal(&phys);
+ 			}
+ 		}
+ 
+ 		udev_device_unref(d);
+ 	}
+ 
+ 	udev_enumerate_unref(e);
+ }
+ #endif
+ 
+ int
+ main(int argc, char **argv)
+ {
+ 	int rc = 1;
+ 	struct udev *udev = NULL;
+ 	struct udev_device *device = NULL;
+-	const char *syspath, *phys = NULL;
++	_autofree_ char *phys = NULL;
++	const char *syspath = NULL;
+ 	const char *product;
+ 	int bustype, vendor_id, product_id, version;
+ 	char group[1024];
+ 	char *str;
+ 
+ 	if (argc != 2)
+ 		return 1;
+ 
+@@ -170,18 +172,17 @@ main(int argc, char **argv)
+ 	if (!device)
+ 		goto out;
+ 
+ 	/* Find the first parent with ATTRS{phys} set. For tablets that
+ 	 * value looks like usb-0000:00:14.0-1/input1. Drop the /input1
+ 	 * bit and use the remainder as device group identifier */
+ 	while (device != NULL) {
+ 		struct udev_device *parent;
+-
+-		phys = udev_device_get_sysattr_value(device, "phys");
++		phys = str_sanitize(udev_device_get_sysattr_value(device, "phys"));
+ 		if (phys)
+ 			break;
+ 
+ 		parent = udev_device_get_parent(device);
+ 		udev_device_ref(parent);
+ 		udev_device_unref(device);
+ 		device = parent;
+ 	}
+-- 
+2.54.0
+

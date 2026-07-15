@@ -1,0 +1,38 @@
+From a487280e095e376a40354e69c01593153d61f126 Mon Sep 17 00:00:00 2001
+From: Josiah Vehrs <jvehrs@amazon.com>
+Date: Wed, 10 Jun 2026 18:17:53 -0700
+Subject: [PATCH] util: fix possible return of unsanitized input in
+ str_sanitize
+
+Fixes: 71a2c5cae2a8 ("util: sanitize control characters in str_sanitize()")
+Part-of: <https://gitlab.freedesktop.org/libinput/libinput/-/merge_requests/1493>
+---
+ src/util-strings.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util-strings.h b/src/util-strings.h
+index 6186c16784d5..a6ff440bd24b 100644
+--- a/src/util-strings.h
++++ b/src/util-strings.h
+@@ -567,17 +567,17 @@ str_sanitize(const char *str)
+ 	for (size_t i = 0; i < slen; i++) {
+ 		unsigned char c = str[i];
+ 		if (c == '%' || c < 0x20 || c == 0x7f) {
+ 			needs_sanitization = true;
+ 			break;
+ 		}
+ 	}
+ 	if (!needs_sanitization)
+-		return strdup(str);
++		return strndup(str, slen);
+ 
+ 	char *sanitized = zalloc(2 * slen + 1);
+ 	const char *src = str;
+ 	char *dst = sanitized;
+ 
+ 	for (size_t i = 0; i < slen; i++) {
+ 		unsigned char c = *src++;
+ 		if (c == '%') {
+-- 
+2.54.0
+

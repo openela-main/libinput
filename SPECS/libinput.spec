@@ -5,7 +5,7 @@
 
 Name:           libinput
 Version:        1.30.1
-Release:        1%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
+Release:        2%{?gitdate:.%{gitdate}git%{gitversion}}%{?dist}
 Summary:        Input device library
 
 # SPDX
@@ -20,6 +20,10 @@ Source0:        https://gitlab.freedesktop.org/libinput/libinput/-/archive/%{ver
 %endif
 
 Patch0002:      0001-RHEL-map-dials-to-rings-on-the-Intuos-Pro-3rd-Gen-de.patch
+# CVE-2026-50292 (RHEL-182371)
+Patch0003:      0001-util-sanitize-control-characters-in-str_sanitize.patch
+Patch0004:      0002-libinput-device-group-sanitize-phys-before-printing-.patch
+Patch0005:      0003-util-fix-possible-return-of-unsanitized-input-in-str.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -162,6 +166,10 @@ intended to be run by users.
 
 
 %changelog
+* Fri Jun 12 2026 Peter Hutterer <peter.hutterer@redhat.com> - 1.30.1-2
+- CVE-2026-50292: sanitize phys before printing it in libinput-device-group
+  Resolves: RHEL-182371
+
 * Wed Dec 17 2025 Peter Hutterer <peter.hutterer@redhat.com> - 1.30.1-1
 - libinput 1.30.1
   Resolves: RHEL-136390
